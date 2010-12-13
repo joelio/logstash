@@ -34,12 +34,21 @@ class LogStash::Web::Server < Sinatra::Base
   aget '/search' do
     headers({"Content-Type" => "text/html" })
     if params[:q] and params[:q] != ""
-      elasticsearch.search(params) do |@results|
-        @hits = (@results["hits"]["hits"] rescue [])
-        body haml :"search/results", :layout => !request.xhr?
-      end
+      # A 'VS' query should do a query where 'VS' becomes 'OR'
+      # But each facet requested should be unique.
+      # This will allow us to sanely paginate VS results.
+      queries = params[:q].split(" VS ")
+      @hits = {}
+
+      queries.each do |query|
+        p = params.clone
+        p[:q] = query
+        elasticsearch.search(p) do |@results|
+          @hits[query] = (@results["hits"]["hits"] rescue [])
+          body haml :"search/results", :layout => !request.xhr?
+        end
     else
-      @hits = []
+      @hits = {}
       body haml :"search/results", :layout => !request.xhr?
     end
   end
@@ -48,56 +57,70 @@ class LogStash::Web::Server < Sinatra::Base
     headers({"Content-Type" => "text/html" })
     count = params["count"] = (params["count"] or 50).to_i
     offset = params["offset"] = (params["offset"] or 0).to_i
-    elasticsearch.search(params) do |@results|
-      #p instance_variables
-      if @results.include?("error")
-        body haml :"search/error", :layout => !request.xhr?
-        next
-      end
 
-      @hits = (@results["hits"]["hits"] rescue [])
-      @total = (@results["hits"]["total"] rescue 0)
-      @graphpoints = []
-      begin
-        @results["facets"]["by_hour"]["entries"].each do |entry|
-          @graphpoints << [entry["key"], entry["count"]]
+    queries = params[:q].split(" VS ")
+    @results = []
+    queries.each do |query|
+      p = params.clone
+      p[:q] = query
+      elasticsearch.search(params) do |results|
+        if results.include?("error")
+          body haml :"search/error", :layout => !request.xhr?
+          next
         end
-      rescue => e
-        puts e
-      end
-
-      if count and offset
-        if @total > (count + offset)
-          @result_end = (count + offset)
-        else 
-          @result_end = @total
+        @hits[query] = {
+          :hits => (results["hits"]["hits"] rescue []),
+          :total => (@results["hits"]["total"] rescue 0)
+          :graphpoints => []
+        }
+        begin
+          results["facets"]["by_hour"]["entries"].each do |entry|
+            @hits[query][:graphpoint] << [entry["key"], entry["count"]]
+          end
+        rescue => e
+          puts e
         end
-        @result_start = offset
-      end
 
-      if count + offset < @total
-        next_params = params.clone
-        next_params["offset"] = [offset + count, @total - count].min
-        @next_href = "?" +  next_params.collect { |k,v| [URI.escape(k.to_s), URI.escape(v.to_s)].join("=") }.join("&")
-        last_params = next_params.clone
-        last_params["offset"] = @total - offset
-        @last_href = "?" +  last_params.collect { |k,v| [URI.escape(k.to_s), URI.escape(v.to_s)].join("=") }.join("&")
-      end
+        if queries.length == @hits.length
+          # Got answers to all our queries, send the result to the client.
+          if queries.length > 1
+            if count and offset
+              if @total > (count + offset)
+                @result_end = (count + offset)
+              else 
+                @result_end = @total
+              end
+              @result_start = offset
+            end # if count and offset
 
-      if offset > 0
-        prev_params = params.clone
-        prev_params["offset"] = [offset - count, 0].max
-        @prev_href = "?" +  prev_params.collect { |k,v| [URI.escape(k.to_s), URI.escape(v.to_s)].join("=") }.join("&")
+            if count + offset < @total
+              next_params = params.clone
+              next_params["offset"] = [offset + count, @total - count].min
+              @next_href = "?" +  next_params.collect { |k,v| [URI.escape(k.to_s), URI.escape(v.to_s)].join("=") }.join("&")
+              last_params = next_params.clone
+              last_params["offset"] = @total - offset
+              @last_href = "?" +  last_params.collect { |k,v| [URI.escape(k.to_s), URI.escape(v.to_s)].join("=") }.join("&")
+            end # if count + offset < @total
 
-        if prev_params["offset"] > 0
-          first_params = prev_params.clone
-          first_params["offset"] = 0
-          @first_href = "?" +  first_params.collect { |k,v| [URI.escape(k.to_s), URI.escape(v.to_s)].join("=") }.join("&")
+            if offset > 0
+              prev_params = params.clone
+              prev_params["offset"] = [offset - count, 0].max
+              @prev_href = "?" +  prev_params.collect { |k,v| [URI.escape(k.to_s), URI.escape(v.to_s)].join("=") }.join("&")
+
+              if prev_params["offset"] > 0
+                first_params = prev_params.clone
+                first_params["offset"] = 0
+                @first_href = "?" +  first_params.collect { |k,v| [URI.escape(k.to_s), URI.escape(v.to_s)].join("=") }.join("&")
+              end
+            end # if offset > 0
+          end # if queries.length > 1
+
+          body haml :"search/ajax", :layout => !request.xhr?
+        else
+          # Notify (somehow) that a query is incomplete and waiting?
         end
-      end
-
-      body haml :"search/ajax", :layout => !request.xhr?
-    end # elasticsearch.search
+      end # elasticsearch.search
+    end # queries.each
   end # apost '/search/ajax'
 
 end # class LogStashWeb

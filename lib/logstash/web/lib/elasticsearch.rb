@@ -36,7 +36,8 @@ class LogStash::Web::ElasticSearch
       }, # facets
       "from" => params[:offset],
       "size" => params[:count],
-    }
+    } # esreq
+
     #@logger.info(["ElasticSearch Query", esreq])
     start_time = Time.now
     req = http.get :body => esreq.to_json
