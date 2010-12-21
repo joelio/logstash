@@ -29,18 +29,20 @@
         |
         %a.pager{ :href => @last_href }
           last
-  - if @hits.length == 0 
+  - if @results.length == 0 
     - if !params[:q]
       No query given. How about <a href="?q=*" class="querychanger">this?</a>
     - else
       No results for query '#{params[:q]}' 
   - else
-    %table.results
-      %tr
-        %th timestamp
-        %th event
-      - @hits.reverse.each do |hit|
-        %tr.event
-          %td.timestamp&= hit["_source"]["@timestamp"]
-          %td.message{ :"data-full" => hit.to_json }
-            %pre&= hit["_source"]["@message"]
+    %pre
+      = ap_debug(@results)
+    / %table.results
+    /   %tr
+    /     %th timestamp
+    /     %th event
+    /   - @results.reverse.each do |hit|
+    /     %tr.event
+    /       %td.timestamp&= hit["_source"]["@timestamp"]
+    /       %td.message{ :"data-full" => hit.to_json }
+    /         %pre&= hit["_source"]["@message"]

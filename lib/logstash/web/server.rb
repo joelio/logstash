@@ -11,6 +11,9 @@ require "rack"
 require "sinatra/async"
 require "lib/elasticsearch"
 require "logstash/namespace"
+require "logstash/logging"
+require "ap"
+require "ap/mixin/action_view"
 
 class EventMachine::ConnectionError < RuntimeError; end
 
@@ -22,6 +25,16 @@ class LogStash::Web::Server < Sinatra::Base
   set :views, "#{File.dirname(__FILE__)}/views"
   elasticsearch = LogStash::Web::ElasticSearch.new
 
+  include AwesomePrintActionView
+  def h(str)
+    return str
+  end
+
+  def content_tag(tag, text, options)
+    return "<" + tag + ">" + text
+  end
+
+
   aget '/style.css' do
     headers "Content-Type" => "text/css; charset=utf8"
     body sass :style
@@ -32,34 +45,42 @@ class LogStash::Web::Server < Sinatra::Base
   end # '/'
 
   aget '/search' do
+    @logger ||= LogStash::Logger.new(STDOUT)
     headers({"Content-Type" => "text/html" })
     if params[:q] and params[:q] != ""
       # A 'VS' query should do a query where 'VS' becomes 'OR'
       # But each facet requested should be unique.
       # This will allow us to sanely paginate VS results.
       queries = params[:q].split(" VS ")
-      @hits = {}
+      @results = {}
 
       queries.each do |query|
         p = params.clone
         p[:q] = query
-        elasticsearch.search(p) do |@results|
-          @hits[query] = (@results["hits"]["hits"] rescue [])
-          body haml :"search/results", :layout => !request.xhr?
+        elasticsearch.search(p) do |results|
+          @results[query] = (results["hits"]["hits"] rescue [])
+
+          if @results.length == queries.length
+            body haml :"search/results", :layout => !request.xhr?
+          end
         end
+      end
     else
-      @hits = {}
+      @results = {}
       body haml :"search/results", :layout => !request.xhr?
     end
   end
 
   apost '/search/ajax' do
+    @logger ||= LogStash::Logger.new(STDOUT)
+
     headers({"Content-Type" => "text/html" })
     count = params["count"] = (params["count"] or 50).to_i
     offset = params["offset"] = (params["offset"] or 0).to_i
 
     queries = params[:q].split(" VS ")
-    @results = []
+    @results = {}
+    @logger.info(["Queries", queries])
     queries.each do |query|
       p = params.clone
       p[:q] = query
@@ -68,20 +89,20 @@ class LogStash::Web::Server < Sinatra::Base
           body haml :"search/error", :layout => !request.xhr?
           next
         end
-        @hits[query] = {
+        @results[query] = {
           :hits => (results["hits"]["hits"] rescue []),
-          :total => (@results["hits"]["total"] rescue 0)
+          :total => (results["hits"]["total"] rescue 0),
           :graphpoints => []
         }
         begin
           results["facets"]["by_hour"]["entries"].each do |entry|
-            @hits[query][:graphpoint] << [entry["key"], entry["count"]]
+            @results[query][:graphpoint] << [entry["key"], entry["count"]]
           end
         rescue => e
           puts e
         end
 
-        if queries.length == @hits.length
+        if queries.length == @results.length
           # Got answers to all our queries, send the result to the client.
           if queries.length > 1
             if count and offset
@@ -115,6 +136,7 @@ class LogStash::Web::Server < Sinatra::Base
             end # if offset > 0
           end # if queries.length > 1
 
+          @logger.info(@results)
           body haml :"search/ajax", :layout => !request.xhr?
         else
           # Notify (somehow) that a query is incomplete and waiting?
