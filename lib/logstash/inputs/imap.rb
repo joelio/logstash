@@ -30,12 +30,12 @@ class LogStash::Inputs::Imap < LogStash::Inputs::Base
   config :timeout, :validate => :number, :default => 5
 
 
-# public
-# def initialize(params)
-#   super
-#
-#   @format ||= ["json"]
-# end # def initialize
+  public
+  def initialize(params)
+    super
+ 
+    @format ||= ["json"]
+  end # def initialize
 
 
   public
@@ -51,8 +51,14 @@ class LogStash::Inputs::Imap < LogStash::Inputs::Base
   def run(queue)
     loop do
       @connection.search(["NOT", "SEEN"]).each do |message_id|
-        msg = @connection.fetch(message_id, ["BODY[TEXT]"])[0].attr["BODY[TEXT]"]
-        e = to_event(msg, @username)
+        msg_hash = Hash.new
+        msg = @connection.fetch(message_id, ["ENVELOPE","BODY[TEXT]"])[0]
+        msg_hash["body"] = msg.attr["BODY[TEXT]"]
+#        msg_hash["from"] = msg.attr["ENVELOPE"].from
+        msg_hash["subject"] = msg.attr["ENVELOPE"].subject
+        msg_hash["message_id"] = msg.attr["ENVELOPE"].message_id
+        msg_json = msg_hash.to_json
+        e = to_event(msg_json, @username)
         if e
           queue << e
           @connection.store(message_id, "+FLAGS", [:Seen])
