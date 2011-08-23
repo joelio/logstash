@@ -31,6 +31,14 @@ class LogStash::Inputs::Imap < LogStash::Inputs::Base
 
 
   public
+  def initialize(params)
+    super
+
+    @format ||= ["json_event"]
+  end # def initialize
+
+
+  public
   def register
     require 'net/imap'
     @connection = Net::IMAP.new(@host, @port ,true)
