@@ -44,6 +44,7 @@ class LogStash::Inputs::Imap < LogStash::Inputs::Base
     loop do
       @connection.search(["NOT", "SEEN"]).each do |message_id|
         e = @connection.fetch(message_id, ["ENVELOPE","UID","BODY","BODY[TEXT]"])
+        e = to_event(e, @username)
         if e
           queue << e
           @connection.store(message_id, "+FLAGS", [:Seen])
