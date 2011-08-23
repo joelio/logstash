@@ -1,8 +1,9 @@
 require "logstash/inputs/base"
 require "logstash/namespace"
 
-# Read events from an email account. Currently only supports IMAPS (SSL)
+# Read events from an IMAP mailbox 
 #
+# TODO (joelio): Add some options to delete and expunge / Add IMAP IDLE?
 class LogStash::Inputs::Imap < LogStash::Inputs::Base
 
   config_name "imap"
@@ -20,10 +21,10 @@ class LogStash::Inputs::Imap < LogStash::Inputs::Base
   config :password, :validate => :string, :required => true
   
   # IMAP folder to open. Defaults to "INBOX".
-  config :folder, :validate => :string, :default => "INBOX"
+  config :folder, :validate => :string, :default => 'INBOX'
 
-  # Refresh interval (in seconds). Defaults to 60.
-  config :refresh, :validate => :number, :default => 60
+  # Refresh interval (in seconds). Defaults to 0.
+  config :refresh, :validate => :number, :default => 0
 
   # Initial connection timeout (in seconds).
   config :timeout, :validate => :number, :default => 5
@@ -34,19 +35,20 @@ class LogStash::Inputs::Imap < LogStash::Inputs::Base
     require 'net/imap'
     @connection = Net::IMAP.new(@host, @port ,true)
     @connection.login(@username,@password)
-    @connection.select('INBOX')
+    @connection.select(@folder)
   end # def register
 
 
   public
   def run(queue)
     loop do
-      @connection.search(["ALL"]).each do |message_id|
+      @connection.search(["NOT", "SEEN"]).each do |message_id|
         e = @connection.fetch(message_id, ["ENVELOPE","UID","BODY","BODY[TEXT]"])
         if e
           queue << e
+          @connection.store(message_id, "+FLAGS", [:Seen])
         end
-      end
+      end 
       sleep @refresh
     end # loop
   end # def run
@@ -56,6 +58,6 @@ class LogStash::Inputs::Imap < LogStash::Inputs::Base
   def teardown
     @connection.logout()
     @connection.disconnect()
-  end
+  end # def teardown
 
 end # class LogStash::Inputs::Imap
